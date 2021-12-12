@@ -245,17 +245,69 @@ Fusion_Filter_Parameters.Q = Q;
 Fusion_Filter_Parameters.T = 0;
 
 for MC = 1:MC_Num
-    for i=1:Step_Num-1
         
-       if  i~= 1 && mod(i,2) == 1
+    err_decent(:,1,MC) = x_k(:,1,MC)-Local_Trackers(2).CombinedStateEstimate(:,1);
+    eps_decentralized(MC,1) = err_decent(:,1,MC)'*inv(Local_Trackers(2).CombinedStateEstimateCov(:,:,1))*err_decent(:,1,MC);
+    
+    for i=2:Step_Num
+        
+        OutputPredictions = zeros(2,Model_Num);
+        OutputPredictionsCov = zeros(2,2,Model_Num);
+        KalmanGains = zeros(4,2,Model_Num);
+        
+        for k=1:2
+            
+         % Karistirma olasiliklari hesaplaniyor:
+        %----------------------------------------
+        [~, c, Mij] = immKaristirmaOlasiligiHesapla(TransProb(:,:,k), T, Local_Trackers(k).Mu(:,i-1));
+        
+        % Karistirma yapiliyor:
+        %---------------------------
+        [MixedStateEstimates,MixedStateEstimatesCov] = immDurumKaristirmaYap(Local_Trackers(k).StateEstimates(:,:,i-1), Local_Trackers(k).StateEstimatesCov(:,:,:,i-1), Mij);
+            
+            for l=1:Model_Num
+                
+                
+                % Prediction:
+                
+                [StatePredictions(:,l), ...
+                    StatePredictionsCov(:,:,l), ...
+                    OutputPredictions(:,l), ...
+                    OutputPredictionsCov(:,:,l), ...
+                    KalmanGains(:,:,l)] = kf_pre(MixedStateEstimates(:,l),...
+                    MixedStateEstimatesCov(:,:,l),...
+                    Local_Trackers(k).IMM_Parameters(l));
+                
+                % Estimation:
+                [...
+                    Local_Trackers(k).StateEstimates(:,l,i), ...
+                    Local_Trackers(k).StateEstimatesCov(:,:,l,i),...
+                    L(l)] = kf_est(...
+                    StatePredictions(:,l),...
+                    StatePredictionsCov(:,:,l),...
+                    OutputPredictions(:,l), ...
+                    OutputPredictionsCov(:,:,l), ...
+                    KalmanGains(:,:,l),...
+                    yk_centralized(2*k-1:2*k,i,MC));
+            end
+            
+                 
+            Local_Trackers(k).Mu(:,i) = immModelOlasiliginiGuncelle(L, c);
+            
+            [Local_Trackers(k).CombinedStateEstimate(:,i),Local_Trackers(k).CombinedStateEstimateCov(:,:,i)] = immDurumBirlestirmeYap(Local_Trackers(k).StateEstimates(:,:,i), Local_Trackers(k).StateEstimatesCov(:,:,:,i),Local_Trackers(k).Mu(:,i));
+            
+           
+        end
+        
+        if  mod(i,2) == 1
             OutputPredictions = zeros(4,Model_Num);
             OutputPredictionsCov = zeros(4,4,Model_Num);
             KalmanGains = zeros(4,4,Model_Num);
             Fusion_Filter_Parameters.R = Local_Trackers(1).CombinedStateEstimateCov(:,:,i);
-         
-                
+            
+            
             for l=1:Model_Num
-               
+                
                 % Prediction:
                 
                 [StatePredictions(:,l), ...
@@ -277,69 +329,21 @@ for MC = 1:MC_Num
                     OutputPredictionsCov(:,:,l), ...
                     KalmanGains(:,:,l),...
                     Local_Trackers(1).CombinedStateEstimate(:,i));
-        
+                
             end
             
             Local_Trackers(2).Mu(:,i) = immModelOlasiliginiGuncelle(L, Local_Trackers(2).Mu(:,i));
             
             [Local_Trackers(2).CombinedStateEstimate(:,i), Local_Trackers(2).CombinedStateEstimateCov(:,:,i)] = immDurumBirlestirmeYap(Local_Trackers(2).StateEstimates(:,:,i), Local_Trackers(2).StateEstimatesCov(:,:,:,i),Local_Trackers(2).Mu(:,i));
             
-        
-        
+            
         end
-        
+
         err_decent(:,i,MC) = x_k(:,i,MC)-Local_Trackers(2).CombinedStateEstimate(:,i);
         eps_decentralized(MC,i) = err_decent(:,i,MC)'*inv(Local_Trackers(2).CombinedStateEstimateCov(:,:,i))*err_decent(:,i,MC);
         
-        OutputPredictions = zeros(2,Model_Num);
-        OutputPredictionsCov = zeros(2,2,Model_Num);
-        KalmanGains = zeros(4,2,Model_Num);
-        
-        for k=1:2
-            
-         % Karistirma olasiliklari hesaplaniyor:
-        %----------------------------------------
-        [~, c, Mij] = immKaristirmaOlasiligiHesapla(TransProb(:,:,k), T, Local_Trackers(k).Mu(:,i));
-        
-        % Karistirma yapiliyor:
-        %---------------------------
-        [MixedStateEstimates,MixedStateEstimatesCov] = immDurumKaristirmaYap(Local_Trackers(k).StateEstimates(:,:,i), Local_Trackers(k).StateEstimatesCov(:,:,:,i), Mij);
-            
-            for l=1:Model_Num
-                
-                
-                % Prediction:
-                
-                [StatePredictions(:,l), ...
-                    StatePredictionsCov(:,:,l), ...
-                    OutputPredictions(:,l), ...
-                    OutputPredictionsCov(:,:,l), ...
-                    KalmanGains(:,:,l)] = kf_pre(MixedStateEstimates(:,l),...
-                    MixedStateEstimatesCov(:,:,l),...
-                    Local_Trackers(k).IMM_Parameters(l));
-                
-                % Estimation:
-                [...
-                    Local_Trackers(k).StateEstimates(:,l,i+1), ...
-                    Local_Trackers(k).StateEstimatesCov(:,:,l,i+1),...
-                    L(l)] = kf_est(...
-                    StatePredictions(:,l),...
-                    StatePredictionsCov(:,:,l),...
-                    OutputPredictions(:,l), ...
-                    OutputPredictionsCov(:,:,l), ...
-                    KalmanGains(:,:,l),...
-                    yk_centralized(2*k-1:2*k,i+1,MC));
-            end
-            
-            Local_Trackers(k).Mu(:,i+1) = immModelOlasiliginiGuncelle(L, c);
-            
-            [Local_Trackers(k).CombinedStateEstimate(:,i+1),Local_Trackers(k).CombinedStateEstimateCov(:,:,i+1)] = immDurumBirlestirmeYap(Local_Trackers(k).StateEstimates(:,:,i+1), Local_Trackers(k).StateEstimatesCov(:,:,:,i+1),Local_Trackers(k).Mu(:,i+1));
-            
-        end
     end
-    
-    err_decent(:,end,MC) = x_k(:,end,MC)-Local_Trackers(2).CombinedStateEstimate(:,end);
-    eps_decentralized(MC,end) = err_decent(:,end,MC)'*inv(Local_Trackers(2).CombinedStateEstimateCov(:,:,end))*err_decent(:,end,MC);
+
        
 end 
 
@@ -408,7 +412,6 @@ OutputPredictionsCov = zeros(2,2,Model_Num);
 KalmanGains = zeros(4,2,Model_Num);
 L = zeros(1,Model_Num);
 
-
 eps_covariance_intersection = zeros(MC_Num,Step_Num); % Normalized Estimation Error Squares Matrix
 err_cov_int = zeros(4,Step_Num,MC_Num);
 
@@ -416,9 +419,55 @@ optim_param = 20;
 w = linspace(1e-3,1-1e-3,optim_param);
 
 for MC = 1:MC_Num
+        
+    err_cov_int(:,1,MC) = x_k(:,1,MC)-CI_Local_Trackers(2).StateEstimates(:,1);
+    eps_covariance_intersection(MC,1) = err_cov_int(:,1,MC)'*inv(CI_Local_Trackers(2).StateEstimatesCov(:,:,1))*err_cov_int(:,1,MC);
     
-    for i=1:Step_Num-1
-        if  i~=1 && mod(i,2) == 1 
+    for i=2:Step_Num
+
+        
+        for k=1:2
+            
+            % Karistirma olasiliklari hesaplaniyor:
+            %----------------------------------------
+            [~, c, Mij] = immKaristirmaOlasiligiHesapla(TransProb(:,:,k), T, CI_Local_Trackers(k).Mu(:,i-1));
+            
+            % Karistirma yapiliyor:
+            %---------------------------
+            [MixedStateEstimates,MixedStateEstimatesCov] = immDurumKaristirmaYap(CI_Local_Trackers(k).StateEstimates(:,:,i-1), CI_Local_Trackers(k).StateEstimatesCov(:,:,:,i-1), Mij);
+            
+            for l=1:Model_Num
+                
+                % Prediction:
+                
+                [StatePredictions(:,l), ...
+                    StatePredictionsCov(:,:,l), ...
+                    OutputPredictions(:,l), ...
+                    OutputPredictionsCov(:,:,l), ...
+                    KalmanGains(:,:,l)] = kf_pre(MixedStateEstimates(:,l),...
+                    MixedStateEstimatesCov(:,:,l),...
+                    CI_Local_Trackers(k).IMM_Parameters(l));
+                
+                % Estimation:
+                [...
+                    CI_Local_Trackers(k).StateEstimates(:,l,i), ...
+                    CI_Local_Trackers(k).StateEstimatesCov(:,:,l,i),...
+                    L(l)] = kf_est(...
+                    StatePredictions(:,l),...
+                    StatePredictionsCov(:,:,l),...
+                    OutputPredictions(:,l), ...
+                    OutputPredictionsCov(:,:,l), ...
+                    KalmanGains(:,:,l),...
+                    yk_centralized(2*k-1:2*k,i,MC));
+            end
+            
+            CI_Local_Trackers(k).Mu(:,i) = immModelOlasiliginiGuncelle(L, c);
+            
+            [CI_Local_Trackers(k).CombinedStateEstimate(:,i),CI_Local_Trackers(k).CombinedStateEstimateCov(:,:,i)] = immDurumBirlestirmeYap(CI_Local_Trackers(k).StateEstimates(:,:,i), CI_Local_Trackers(k).StateEstimatesCov(:,:,:,i),CI_Local_Trackers(k).Mu(:,i));
+            
+        end
+        
+        if  mod(i,2) == 1
                      
             for l=1:Model_Num
                 
@@ -464,51 +513,9 @@ for MC = 1:MC_Num
         
         err_cov_int(:,i,MC) = x_k(:,i,MC)-CI_Local_Trackers(2).CombinedStateEstimate(:,i);
         eps_covariance_intersection(MC,i) = err_cov_int(:,i,MC)'*inv(CI_Local_Trackers(2).CombinedStateEstimateCov(:,:,i))*err_cov_int(:,i,MC);
-        
-        for k=1:2
-            
-            % Karistirma olasiliklari hesaplaniyor:
-            %----------------------------------------
-            [~, c, Mij] = immKaristirmaOlasiligiHesapla(TransProb(:,:,k), T, CI_Local_Trackers(k).Mu(:,i));
-            
-            % Karistirma yapiliyor:
-            %---------------------------
-            [MixedStateEstimates,MixedStateEstimatesCov] = immDurumKaristirmaYap(CI_Local_Trackers(k).StateEstimates(:,:,i), CI_Local_Trackers(k).StateEstimatesCov(:,:,:,i), Mij);
-            
-            for l=1:Model_Num
-                
-                % Prediction:
-                
-                [StatePredictions(:,l), ...
-                    StatePredictionsCov(:,:,l), ...
-                    OutputPredictions(:,l), ...
-                    OutputPredictionsCov(:,:,l), ...
-                    KalmanGains(:,:,l)] = kf_pre(MixedStateEstimates(:,l),...
-                    MixedStateEstimatesCov(:,:,l),...
-                    CI_Local_Trackers(k).IMM_Parameters(l));
-                
-                % Estimation:
-                [...
-                    CI_Local_Trackers(k).StateEstimates(:,l,i+1), ...
-                    CI_Local_Trackers(k).StateEstimatesCov(:,:,l,i+1),...
-                    L(l)] = kf_est(...
-                    StatePredictions(:,l),...
-                    StatePredictionsCov(:,:,l),...
-                    OutputPredictions(:,l), ...
-                    OutputPredictionsCov(:,:,l), ...
-                    KalmanGains(:,:,l),...
-                    yk_centralized(2*k-1:2*k,i+1,MC));
-            end
-            
-            CI_Local_Trackers(k).Mu(:,i+1) = immModelOlasiliginiGuncelle(L, c);
-            
-            [CI_Local_Trackers(k).CombinedStateEstimate(:,i+1),CI_Local_Trackers(k).CombinedStateEstimateCov(:,:,i+1)] = immDurumBirlestirmeYap(CI_Local_Trackers(k).StateEstimates(:,:,i+1), CI_Local_Trackers(k).StateEstimatesCov(:,:,:,i+1),CI_Local_Trackers(k).Mu(:,i+1));
-            
-        end
+               
     end
-    
-    err_cov_int(:,end,MC) = x_k(:,end,MC)-CI_Local_Trackers(2).StateEstimates(:,end);
-    eps_covariance_intersection(MC,end) = err_cov_int(:,end,MC)'*inv(CI_Local_Trackers(2).StateEstimatesCov(:,:,end))*err_cov_int(:,end,MC);
+
 end
 
 %%
