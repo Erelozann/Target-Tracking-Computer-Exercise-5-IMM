@@ -174,7 +174,7 @@ for MC = 1:MC_Num
 end
 
 
-%% Decentralized Solution
+%% Decentralized Solution with a Merged Gaussian
 
 % Filter Parameters
 IMM_Filter_Parameters(1,1).H=  H;                      
@@ -341,6 +341,153 @@ for MC = 1:MC_Num
 
         err_decent(:,i,MC) = x_k(:,i,MC)-Local_Trackers(2).CombinedStateEstimate(:,i);
         eps_decentralized(MC,i) = err_decent(:,i,MC)'*inv(Local_Trackers(2).CombinedStateEstimateCov(:,:,i))*err_decent(:,i,MC);
+        
+    end
+
+       
+end 
+
+%% Decentralized Solution with a Mixture
+
+% Filter Parameters
+IMM_Filter_Parameters(1,1).H=  H;                      
+IMM_Filter_Parameters(1,1).Q = Q_coeffs(1)^2*Q;
+IMM_Filter_Parameters(1,1).R = R;
+IMM_Filter_Parameters(1,1).T = T;
+
+IMM_Filter_Parameters(1,2).H=  H;                     
+IMM_Filter_Parameters(1,2).Q = Q_coeffs(2)^2*Q;
+IMM_Filter_Parameters(1,2).R = R;
+IMM_Filter_Parameters(1,2).T = T;
+
+TransProb(:,:,1) = [0.9 0.1;
+                    0.1 0.9];
+
+IMM_Filter_Parameters(2,1).H=  H;                      
+IMM_Filter_Parameters(2,1).Q = Q_coeffs(1)^2*Q;
+IMM_Filter_Parameters(2,1).R = R;
+IMM_Filter_Parameters(2,1).T = T;
+
+IMM_Filter_Parameters(2,2).H=  H;                     
+IMM_Filter_Parameters(2,2).Q = Q_coeffs(2)^2*Q;
+IMM_Filter_Parameters(2,2).R = R;
+IMM_Filter_Parameters(2,2).T = T;
+
+TransProb(:,:,2) = [0.9 0.1;
+                    0.1 0.9];
+% Estimate Initialization
+
+StateEstimates = zeros(4,Model_Num,Step_Num);
+CombinedStateEstimate = zeros(4,Step_Num);
+StateEstimates(:,1,1) = x0_bar;
+StateEstimates(:,2,1) = x0_bar;
+CombinedStateEstimate(:,1) = x0_bar;
+
+StateEstimatesCov = zeros(4,4,Model_Num,Step_Num);
+StateEstimatesCov(:,:,1,1) = P0_bar;
+StateEstimatesCov(:,:,2,1) = P0_bar;
+CombinedStateEstimateCov = zeros(4,4,Step_Num);
+CombinedStateEstimateCov(:,:,1) = P0_bar;
+Mu = zeros(Model_Num,Step_Num);
+Mu(:,1) = [0.5;0.5];
+
+Local_Trackers(1).IMM_Parameters = IMM_Filter_Parameters(1,:);
+Local_Trackers(1).StateEstimates = StateEstimates;
+Local_Trackers(1).CombinedStateEstimate = CombinedStateEstimate;
+Local_Trackers(1).StateEstimatesCov = StateEstimatesCov;
+Local_Trackers(1).CombinedStateEstimateCov = CombinedStateEstimateCov;
+Local_Trackers(1).Mu = Mu;
+
+Local_Trackers(2).IMM_Parameters = IMM_Filter_Parameters(2,:);
+Local_Trackers(2).StateEstimates = StateEstimates;
+Local_Trackers(2).CombinedStateEstimate = CombinedStateEstimate;
+Local_Trackers(2).StateEstimatesCov = StateEstimatesCov;
+Local_Trackers(2).CombinedStateEstimateCov = CombinedStateEstimateCov;
+Local_Trackers(2).Mu = Mu;
+
+StatePredictions = zeros(4,Model_Num);
+StatePredictionsCov = zeros(4,4,Model_Num);
+L = zeros(1,Model_Num);
+
+eps_mixdecentralized = zeros(MC_Num,Step_Num); % Normalized Estimation Error Squares Matrix
+
+err_mixdecent = zeros(4,Step_Num,MC_Num);
+
+for MC = 1:MC_Num
+        
+    err_mixdecent(:,1,MC) = x_k(:,1,MC)-Local_Trackers(2).CombinedStateEstimate(:,1);
+    eps_mixdecentralized(MC,1) = err_mixdecent(:,1,MC)'*inv(Local_Trackers(2).CombinedStateEstimateCov(:,:,1))*err_mixdecent(:,1,MC);
+    
+    for i=2:Step_Num
+        
+        OutputPredictions = zeros(2,Model_Num);
+        OutputPredictionsCov = zeros(2,2,Model_Num);
+        KalmanGains = zeros(4,2,Model_Num);
+        
+        for k=1:2
+            
+         % Karistirma olasiliklari hesaplaniyor:
+        %----------------------------------------
+        [~, c, Mij] = immKaristirmaOlasiligiHesapla(TransProb(:,:,k), T, Local_Trackers(k).Mu(:,i-1));
+        
+        % Karistirma yapiliyor:
+        %---------------------------
+        [MixedStateEstimates,MixedStateEstimatesCov] = immDurumKaristirmaYap(Local_Trackers(k).StateEstimates(:,:,i-1), Local_Trackers(k).StateEstimatesCov(:,:,:,i-1), Mij);
+            
+            for l=1:Model_Num
+                
+                
+                % Prediction:
+                
+                [StatePredictions(:,l), ...
+                    StatePredictionsCov(:,:,l), ...
+                    OutputPredictions(:,l), ...
+                    OutputPredictionsCov(:,:,l), ...
+                    KalmanGains(:,:,l)] = kf_pre(MixedStateEstimates(:,l),...
+                    MixedStateEstimatesCov(:,:,l),...
+                    Local_Trackers(k).IMM_Parameters(l));
+                
+                % Estimation:
+                [...
+                    Local_Trackers(k).StateEstimates(:,l,i), ...
+                    Local_Trackers(k).StateEstimatesCov(:,:,l,i),...
+                    L(l)] = kf_est(...
+                    StatePredictions(:,l),...
+                    StatePredictionsCov(:,:,l),...
+                    OutputPredictions(:,l), ...
+                    OutputPredictionsCov(:,:,l), ...
+                    KalmanGains(:,:,l),...
+                    yk_centralized(2*k-1:2*k,i,MC));
+            end
+            
+                 
+            Local_Trackers(k).Mu(:,i) = immModelOlasiliginiGuncelle(L, c);
+            
+            [Local_Trackers(k).CombinedStateEstimate(:,i),Local_Trackers(k).CombinedStateEstimateCov(:,:,i)] = immDurumBirlestirmeYap(Local_Trackers(k).StateEstimates(:,:,i), Local_Trackers(k).StateEstimatesCov(:,:,:,i),Local_Trackers(k).Mu(:,i));
+            
+           
+        end
+        
+        if  mod(i,2) == 1
+            
+            for l=1:Model_Num
+               
+
+                [Local_Trackers(2).Mu(l,i),Local_Trackers(2).StateEstimatesCov(:,:,l,i),Local_Trackers(2).StateEstimates(:,l,i)] = NaiveFusion(Local_Trackers(2).Mu(l,i), Local_Trackers(2).StateEstimates(:,l,i),  Local_Trackers(2).StateEstimatesCov(:,:,l,i),...
+                                                                Local_Trackers(1).Mu(:,i), Local_Trackers(1).StateEstimates(:,:,i),  Local_Trackers(1).StateEstimatesCov(:,:,:,i));
+                
+                
+            end
+            
+            Local_Trackers(2).Mu(:,i) = Local_Trackers(2).Mu(:,i)/sum(Local_Trackers(2).Mu(:,i));
+            
+            [Local_Trackers(2).CombinedStateEstimate(:,i), Local_Trackers(2).CombinedStateEstimateCov(:,:,i)] = immDurumBirlestirmeYap(Local_Trackers(2).StateEstimates(:,:,i), Local_Trackers(2).StateEstimatesCov(:,:,:,i),Local_Trackers(2).Mu(:,i));
+                  
+            
+        end
+
+        err_mixdecent(:,i,MC) = x_k(:,i,MC)-Local_Trackers(2).CombinedStateEstimate(:,i);
+        eps_mixdecentralized(MC,i) = err_mixdecent(:,i,MC)'*inv(Local_Trackers(2).CombinedStateEstimateCov(:,:,i))*err_mixdecent(:,i,MC);
         
     end
 
@@ -523,10 +670,12 @@ end
 time = 0:Step_Num-1*T;
 err_cent_mean = sqrt(mean(err_cent.^2,3));
 err_decent_mean = sqrt(mean(err_decent.^2,3));
+err_mixdecent_mean = sqrt(mean(err_mixdecent.^2,3));
 err_cov_int_mean = sqrt(mean(err_cov_int.^2,3));
 
 eps_centralized_mean = mean(eps_centralized,1);
 eps_decentralized_mean = mean(eps_decentralized,1);
+eps_mixdecentralized_mean = mean(eps_mixdecentralized,1);
 eps_covariance_intersection_mean = mean(eps_covariance_intersection,1);
 
 figure;
@@ -535,26 +684,29 @@ thresh_max = chi2inv(0.995,MC_Num*4)/MC_Num;
 hold on
 plot(time,eps_centralized_mean)
 plot(time,eps_decentralized_mean)
+plot(time,eps_mixdecentralized_mean)
 plot(time,eps_covariance_intersection_mean)
 plot(time,repmat(thresh_min,1,100))
 plot(time,repmat(thresh_max,1,100))
-legend({'Centralized', 'Decentralized','Covariance Intersection','Threshold Min','Threshold Max'}, 'fontsize', 10);
+legend({'Centralized', 'Decentralized','Mix Decentralized','Covariance Intersection','Threshold Min','Threshold Max'}, 'fontsize', 10);
 ylabel('NEES', 'fontsize', 12); grid on; xlabel('Time', 'fontsize', 12); grid on;
 
 figure;
 hold on;
 plot(time(2:end),err_cent_mean(1,2:end));
 plot(time(2:end),err_decent_mean(1,2:end));
+plot(time(2:end),err_mixdecent_mean(1,2:end));
 plot(time(2:end),err_cov_int_mean(1,2:end));
-legend({'Centralized', 'Decentralized','Covariance Intersection'}, 'fontsize', 10);
+legend({'Centralized', 'Decentralized','Mix Decentralized','Covariance Intersection'}, 'fontsize', 10);
 ylabel('RMS of Position X', 'fontsize', 12); grid on; xlabel('Time', 'fontsize', 12); grid on;
 
 figure;
 hold on;
 plot(time(2:end),err_cent_mean(2,2:end));
 plot(time(2:end),err_decent_mean(2,2:end));
+plot(time(2:end),err_mixdecent_mean(2,2:end));
 plot(time(2:end),err_cov_int_mean(2,2:end));
-legend({'Centralized', 'Decentralized','Covariance Intersection'}, 'fontsize', 10);
+legend({'Centralized', 'Decentralized','Mix Decentralized','Covariance Intersection'}, 'fontsize', 10);
 ylabel('RMS of Position Y', 'fontsize', 12); grid on; xlabel('Time', 'fontsize', 12); grid on;
 
 
@@ -562,8 +714,9 @@ figure;
 hold on;
 plot(time(2:end),err_cent_mean(3,2:end));
 plot(time(2:end),err_decent_mean(3,2:end));
+plot(time(2:end),err_mixdecent_mean(3,2:end));
 plot(time(2:end),err_cov_int_mean(3,2:end));
-legend({'Centralized', 'Decentralized','Covariance Intersection'}, 'fontsize', 10);
+legend({'Centralized', 'Decentralized','Mix Decentralized','Covariance Intersection'}, 'fontsize', 10);
 ylabel('RMS of Velocity X', 'fontsize', 12); grid on; xlabel('Time', 'fontsize', 12); grid on;
 
 
@@ -571,6 +724,7 @@ figure;
 hold on;
 plot(time(2:end),err_cent_mean(4,2:end));
 plot(time(2:end),err_decent_mean(4,2:end));
+plot(time(2:end),err_mixdecent_mean(4,2:end));
 plot(time(2:end),err_cov_int_mean(4,2:end));
-legend({'Centralized', 'Decentralized','Covariance Intersection'}, 'fontsize', 10);
+legend({'Centralized', 'Decentralized','Mix Decentralized','Covariance Intersection'}, 'fontsize', 10);
 ylabel('RMS of Velocity Y', 'fontsize', 12); grid on; xlabel('Time', 'fontsize', 12); grid on;
